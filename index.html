@@ -3,84 +3,28 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MQTT聊天室</title>
+    <title>Neural Network Communication Hub</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/mqtt@4.3.7/dist/mqtt.min.js"></script>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Orbitron:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <style>
-        @tailwind base;
-        @tailwind components;
-        @tailwind utilities;
-        
-        :root {
-            --neon-cyan: #00ffff;
-            --neon-pink: #ff00ff;
-            --neon-green: #00ff00;
-            --dark-bg: #0a0a0f;
-            --card-bg: rgba(15, 15, 25, 0.8);
+        body {
+            font-family: 'JetBrains Mono', monospace;
+            background: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 50%, #16213e 100%);
+            min-height: 100vh;
         }
         
-        .font-orbitron { font-family: 'Orbitron', monospace; }
-        .font-mono { font-family: 'JetBrains Mono', monospace; }
+        .font-orbitron {
+            font-family: 'Orbitron', monospace;
+        }
         
         .neon-glow {
-            box-shadow: 0 0 5px currentColor, 0 0 10px currentColor, 0 0 15px currentColor;
-        }
-        
-        .neon-text {
-            text-shadow: 0 0 5px currentColor, 0 0 10px currentColor, 0 0 15px currentColor;
-        }
-        
-        .pixel-border {
-            border-image: url("data:image/svg+xml,%3csvg width='100' height='100' xmlns='http://www.w3.org/2000/svg'%3e%3cpath d='m0 0h100v100h-100z' fill='none' stroke='%2300ffff' stroke-width='2'/%3e%3c/svg%3e") 2;
+            box-shadow: 0 0 10px currentColor, 0 0 20px currentColor, 0 0 30px currentColor;
         }
         
         .glass-effect {
             backdrop-filter: blur(10px);
-            background: rgba(15, 15, 25, 0.7);
-            border: 1px solid rgba(0, 255, 255, 0.2);
-        }
-        
-        .scrollbar-cyber::-webkit-scrollbar {
-            width: 8px;
-        }
-        
-        .scrollbar-cyber::-webkit-scrollbar-track {
             background: rgba(0, 0, 0, 0.3);
-            border-radius: 4px;
-        }
-        
-        .scrollbar-cyber::-webkit-scrollbar-thumb {
-            background: linear-gradient(45deg, #00ffff, #ff00ff);
-            border-radius: 4px;
-        }
-        
-        .scrollbar-cyber::-webkit-scrollbar-thumb:hover {
-            background: linear-gradient(45deg, #ff00ff, #00ffff);
-        }
-        
-        .animate-pulse-neon {
-            animation: pulse-neon 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-        }
-        
-        @keyframes pulse-neon {
-            0%, 100% {
-                opacity: 1;
-                text-shadow: 0 0 5px currentColor, 0 0 10px currentColor, 0 0 15px currentColor;
-            }
-            50% {
-                opacity: 0.7;
-                text-shadow: 0 0 2px currentColor, 0 0 5px currentColor, 0 0 8px currentColor;
-            }
-        }
-        
-        .grid-pattern {
-            background-image: 
-                linear-gradient(rgba(0, 255, 255, 0.1) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(0, 255, 255, 0.1) 1px, transparent 1px);
-            background-size: 20px 20px;
         }
         
         .message-slide-in {
@@ -90,136 +34,183 @@
         @keyframes slideInMessage {
             from {
                 opacity: 0;
-                transform: translateY(20px) scale(0.95);
+                transform: translateY(20px);
             }
             to {
                 opacity: 1;
-                transform: translateY(0) scale(1);
+                transform: translateY(0);
             }
+        }
+        
+        .animate-pulse-neon {
+            animation: pulseNeon 2s infinite;
+        }
+        
+        @keyframes pulseNeon {
+            0%, 100% {
+                box-shadow: 0 0 5px currentColor;
+            }
+            50% {
+                box-shadow: 0 0 20px currentColor, 0 0 30px currentColor;
+            }
+        }
+        
+        /* 自定义滚动条 */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.1);
+            border-radius: 3px;
+        }
+        
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: rgba(6, 182, 212, 0.5);
+            border-radius: 3px;
+        }
+        
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: rgba(6, 182, 212, 0.8);
         }
     </style>
 </head>
-<body class="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 grid-pattern font-mono">
-    <div class="min-h-screen flex items-center justify-center p-4">
-        <div class="w-full max-w-7xl h-[90vh] glass-effect rounded-2xl overflow-hidden shadow-2xl">
-            <!-- 聊天室头部 -->
-            <div class="bg-gradient-to-r from-cyan-500/20 via-purple-500/20 to-pink-500/20 border-b border-cyan-500/30 p-6">
-                <div class="flex items-center justify-between">
-                    <div class="flex items-center space-x-4">
-                        <div class="w-12 h-12 bg-gradient-to-br from-cyan-400 to-purple-600 rounded-lg flex items-center justify-center neon-glow">
-                            <span class="text-2xl">🌐</span>
-                        </div>
-                        <div>
-                            <h1 class="text-3xl font-orbitron font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-400 neon-text animate-pulse-neon">
-                                MQTT CHATROOM
-                            </h1>
-                            <p class="text-cyan-300/70 text-sm font-mono">Neural Network Communication Hub</p>
-                        </div>
+<body class="text-cyan-100">
+    <div class="min-h-screen flex flex-col">
+        <!-- Header -->
+        <header class="glass-effect border-b border-cyan-500/30 p-4">
+            <div class="max-w-7xl mx-auto flex justify-between items-center">
+                <div class="flex items-center space-x-4">
+                    <div class="w-12 h-12 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center border border-cyan-500/30 neon-glow">
+                        <span class="text-2xl">🧠</span>
                     </div>
-                    <div class="flex items-center space-x-6">
-                        <div class="flex items-center space-x-2">
-                            <div id="connectionStatus" class="px-4 py-2 rounded-full text-xs font-bold bg-red-500/20 text-red-400 border border-red-500/30 status-disconnected">
-                                OFFLINE
-                            </div>
-                        </div>
-                        <div id="onlineCount" class="px-4 py-2 rounded-full text-xs font-bold bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
-                            USERS: 0
-                        </div>
+                    <div>
+                        <h1 class="text-2xl font-orbitron font-bold text-cyan-400">MQTT CHATROOM</h1>
+                        <p class="text-sm text-gray-400 font-mono">Neural Network Communication Hub</p>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <div id="connectionStatus" class="px-4 py-2 rounded-full text-xs font-bold bg-red-500/20 text-red-400 border border-red-500/30">
+                        OFFLINE
+                    </div>
+                    <div id="onlineCount" class="px-4 py-2 rounded-full text-xs font-bold bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 font-orbitron">
+                        USERS: 0
                     </div>
                 </div>
             </div>
+        </header>
 
-            <!-- 连接配置面板 -->
-            <div id="connectionPanel" class="flex-1 flex items-center justify-center p-8">
-                <div class="w-full max-w-md space-y-6">
-                    <div class="text-center mb-8">
-                        <h3 class="text-2xl font-orbitron font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-400 mb-2">
-                            SYSTEM ACCESS
-                        </h3>
-                        <p class="text-cyan-300/70 text-sm">Initialize neural connection parameters</p>
+        <!-- Connection Panel -->
+        <div id="connectionPanel" class="flex-1 flex items-center justify-center p-8">
+            <div class="glass-effect border border-cyan-500/30 rounded-2xl p-8 max-w-md w-full">
+                <div class="text-center mb-8">
+                    <div class="w-16 h-16 mx-auto mb-4 rounded-xl bg-gradient-to-br from-purple-500 to-cyan-500 flex items-center justify-center border border-cyan-500/30 neon-glow">
+                        <span class="text-3xl">🔗</span>
+                    </div>
+                    <h2 class="text-2xl font-orbitron font-bold text-cyan-400 mb-2">SYSTEM ACCESS</h2>
+                    <p class="text-gray-400 text-sm font-mono">Initialize neural connection parameters</p>
+                </div>
+
+                <div class="space-y-6">
+                    <div>
+                        <label class="block text-sm font-bold text-cyan-400 mb-2 font-orbitron">BROKER NODE</label>
+                        <input 
+                            type="text" 
+                            id="brokerUrl" 
+                            value="wss://broker.emqx.io:8084/mqtt"
+                            class="w-full px-4 py-3 bg-black/50 border border-cyan-500/30 rounded-lg text-cyan-100 font-mono text-sm focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400"
+                            placeholder="wss://broker.emqx.io:8084/mqtt"
+                        >
                     </div>
                     
-                    <div class="space-y-4">
-                        <div class="form-group">
-                            <label for="brokerUrl" class="block text-cyan-300 text-sm font-bold mb-2 font-orbitron">
-                                BROKER NODE
-                            </label>
-                            <input type="text" id="brokerUrl" value="wss://broker.emqx.io:8084/mqtt" 
-                                   class="w-full px-4 py-3 bg-black/50 border border-cyan-500/30 rounded-lg text-cyan-100 placeholder-cyan-500/50 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20 transition-all duration-300 font-mono text-sm"
-                                   placeholder="wss://broker.emqx.io:8084/mqtt">
-                        </div>
-                        
-                        <div class="form-group">
-                            <label for="username" class="block text-cyan-300 text-sm font-bold mb-2 font-orbitron">
-                                USER ID
-                            </label>
-                            <input type="text" id="username" 
-                                   class="w-full px-4 py-3 bg-black/50 border border-cyan-500/30 rounded-lg text-cyan-100 placeholder-cyan-500/50 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20 transition-all duration-300 font-mono text-sm"
-                                   placeholder="Enter your neural ID">
-                        </div>
-                        
-                        <div class="form-group">
-                            <label for="chatRoom" class="block text-cyan-300 text-sm font-bold mb-2 font-orbitron">
-                                CHANNEL
-                            </label>
-                            <input type="text" id="chatRoom" value="general" 
-                                   class="w-full px-4 py-3 bg-black/50 border border-cyan-500/30 rounded-lg text-cyan-100 placeholder-cyan-500/50 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20 transition-all duration-300 font-mono text-sm"
-                                   placeholder="Channel designation">
-                        </div>
+                    <div>
+                        <label class="block text-sm font-bold text-cyan-400 mb-2 font-orbitron">USER ID</label>
+                        <input 
+                            type="text" 
+                            id="username" 
+                            class="w-full px-4 py-3 bg-black/50 border border-cyan-500/30 rounded-lg text-cyan-100 font-mono text-sm focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400"
+                            placeholder="Enter neural ID..."
+                        >
                     </div>
                     
-                    <button id="connectBtn" class="w-full py-4 bg-gradient-to-r from-cyan-500 to-purple-600 hover:from-cyan-400 hover:to-purple-500 text-white font-orbitron font-bold rounded-lg transition-all duration-300 transform hover:scale-105 neon-glow disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none">
+                    <div>
+                        <label class="block text-sm font-bold text-cyan-400 mb-2 font-orbitron">CHANNEL</label>
+                        <input 
+                            type="text" 
+                            id="chatRoom" 
+                            value="neural-hub"
+                            class="w-full px-4 py-3 bg-black/50 border border-cyan-500/30 rounded-lg text-cyan-100 font-mono text-sm focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400"
+                            placeholder="neural-hub"
+                        >
+                    </div>
+                    
+                    <button 
+                        id="connectBtn" 
+                        class="w-full py-4 bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-bold rounded-lg font-orbitron text-sm hover:from-cyan-400 hover:to-blue-500 transition-all duration-300 border border-cyan-500/30 neon-glow disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
                         ESTABLISH CONNECTION
                     </button>
                 </div>
             </div>
+        </div>
 
-            <!-- 主聊天区域 -->
-            <div id="chatArea" class="hidden flex-1 flex flex-col h-full">
-                <div class="flex-1 flex overflow-hidden">
-                    <!-- 消息显示区域 -->
-                    <div class="flex-1 flex flex-col">
-                        <div class="flex-1 overflow-hidden">
-                            <div id="messagesList" class="h-full overflow-y-auto scrollbar-cyber p-6 space-y-4"></div>
-                        </div>
-                    </div>
-
-                    <!-- 在线用户列表 -->
-                    <div class="w-80 border-l border-cyan-500/30 bg-black/20 flex flex-col">
-                        <div class="p-4 border-b border-cyan-500/30">
-                            <h4 class="font-orbitron font-bold text-cyan-400 text-sm">ACTIVE NODES</h4>
-                        </div>
-                        <div class="flex-1 overflow-y-auto scrollbar-cyber p-4">
-                            <div id="usersList" class="space-y-2"></div>
-                        </div>
+        <!-- Chat Area -->
+        <div id="chatArea" class="hidden flex-1 flex">
+            <!-- Messages Area -->
+            <div class="flex-1 flex flex-col">
+                <!-- Messages List -->
+                <div class="flex-1 overflow-hidden">
+                    <div id="messagesList" class="h-full overflow-y-auto custom-scrollbar p-6 space-y-4">
+                        <!-- Messages will be inserted here -->
                     </div>
                 </div>
-
-                <!-- 消息输入区域 - 固定在底部 -->
-                <div class="border-t border-cyan-500/30 bg-black/30 p-4">
-                    <div class="flex items-end space-x-4">
-                        <div class="flex-1">
-                            <input type="text" id="messageInput" maxlength="500"
-                                   class="w-full px-4 py-3 bg-black/50 border border-cyan-500/30 rounded-lg text-cyan-100 placeholder-cyan-500/50 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20 transition-all duration-300 font-mono text-sm resize-none"
-                                   placeholder="Transmit message...">
-                        </div>
-                        <button id="sendBtn" class="px-6 py-3 bg-gradient-to-r from-cyan-500 to-purple-600 hover:from-cyan-400 hover:to-purple-500 text-white font-orbitron font-bold rounded-lg transition-all duration-300 transform hover:scale-105 neon-glow disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none">
+                
+                <!-- Message Input -->
+                <div class="glass-effect border-t border-cyan-500/30 p-6">
+                    <div class="flex space-x-4 mb-2">
+                        <input 
+                            type="text" 
+                            id="messageInput" 
+                            class="flex-1 px-4 py-3 bg-black/50 border border-cyan-500/30 rounded-lg text-cyan-100 font-mono text-sm focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400"
+                            placeholder="Transmit neural data..."
+                            maxlength="500"
+                        >
+                        <button 
+                            id="sendBtn" 
+                            class="px-6 py-3 bg-gradient-to-r from-purple-500 to-pink-600 text-white font-bold rounded-lg font-orbitron text-sm hover:from-purple-400 hover:to-pink-500 transition-all duration-300 border border-purple-500/30 neon-glow disabled:opacity-50"
+                        >
                             SEND
                         </button>
                     </div>
-                    <div class="flex justify-between items-center mt-2 text-xs">
+                    <div class="flex justify-between items-center text-xs">
                         <span id="charCount" class="text-cyan-400/70 font-mono">0/500</span>
-                        <button id="disconnectBtn" class="px-3 py-1 bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 rounded font-orbitron text-xs transition-all duration-300">
+                        <button 
+                            id="disconnectBtn" 
+                            class="px-3 py-1 bg-red-500/20 text-red-400 border border-red-500/30 rounded-full text-xs font-mono hover:bg-red-500/30 transition-all duration-300"
+                        >
                             DISCONNECT
                         </button>
                     </div>
                 </div>
             </div>
+            
+            <!-- Users Sidebar -->
+            <div class="w-80 glass-effect border-l border-cyan-500/30 p-6">
+                <div class="mb-6">
+                    <h3 class="text-lg font-orbitron font-bold text-cyan-400 mb-2">ACTIVE NODES</h3>
+                    <div class="h-px bg-gradient-to-r from-cyan-500/50 to-transparent"></div>
+                </div>
+                <div id="usersList" class="space-y-3">
+                    <!-- Users will be inserted here -->
+                </div>
+            </div>
         </div>
     </div>
 
-    <!-- 通知容器 -->
-    <div id="notifications" class="fixed top-4 right-4 z-50 space-y-2"></div>
+    <!-- Notifications -->
+    <div id="notifications" class="fixed top-4 right-4 z-50 space-y-2">
+        <!-- Notifications will be inserted here -->
+    </div>
 
     <script src="script.js"></script>
 </body>
