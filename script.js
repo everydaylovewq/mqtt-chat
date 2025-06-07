@@ -4,7 +4,10 @@ class MQTTChatroom {
         this.username = '';
         this.chatRoom = '';
         this.isConnected = false;
-        this.onlineUsers = new Set();
+        this.onlineUsers = new Map(); // 改为Map存储用户详细信息
+        this.heartbeatInterval = null;
+        this.userSyncInterval = null;
+        this.lastHeartbeat = Date.now();
         
         this.initializeElements();
         this.bindEvents();
@@ -63,6 +66,20 @@ class MQTTChatroom {
                 }
             });
         });
+
+        // 页面关闭时清理
+        window.addEventListener('beforeunload', () => {
+            this.cleanup();
+        });
+
+        // 页面可见性变化处理
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                this.handlePageHidden();
+            } else {
+                this.handlePageVisible();
+            }
+        });
     }
 
     loadSavedSettings() {
@@ -95,13 +112,27 @@ class MQTTChatroom {
         this.connectBtn.textContent = '连接中...';
 
         try {
-            // 创建MQTT客户端
+            // 创建MQTT客户端，使用更唯一的客户端ID
+            const clientId = `chat_${username}_${chatRoom}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            
             this.client = mqtt.connect(brokerUrl, {
-                clientId: `chat_${username}_${Date.now()}`,
+                clientId: clientId,
                 username: username,
                 clean: true,
                 reconnectPeriod: 5000,
-                keepalive: 60
+                keepalive: 30, // 减少心跳间隔
+                connectTimeout: 10000,
+                will: {
+                    topic: `chatroom/${chatRoom}/users/leave`,
+                    payload: JSON.stringify({
+                        username: username,
+                        timestamp: new Date().toISOString(),
+                        action: 'leave',
+                        reason: 'connection_lost'
+                    }),
+                    qos: 1,
+                    retain: false
+                }
             });
 
             // 设置连接事件监听器
@@ -130,23 +161,39 @@ class MQTTChatroom {
                 `chatroom/${this.chatRoom}/messages`,
                 `chatroom/${this.chatRoom}/users/join`,
                 `chatroom/${this.chatRoom}/users/leave`,
-                `chatroom/${this.chatRoom}/users/list`
+                `chatroom/${this.chatRoom}/users/heartbeat`,
+                `chatroom/${this.chatRoom}/users/query`,
+                `chatroom/${this.chatRoom}/users/response`
             ];
             
-            topics.forEach(topic => {
-                this.client.subscribe(topic, (err) => {
-                    if (err) {
-                        console.error(`订阅主题失败 ${topic}:`, err);
-                    }
+            // 使用Promise确保所有订阅完成后再发送加入通知
+            Promise.all(topics.map(topic => {
+                return new Promise((resolve, reject) => {
+                    this.client.subscribe(topic, { qos: 1 }, (err) => {
+                        if (err) {
+                            console.error(`订阅主题失败 ${topic}:`, err);
+                            reject(err);
+                        } else {
+                            console.log(`成功订阅主题: ${topic}`);
+                            resolve();
+                        }
+                    });
                 });
+            })).then(() => {
+                // 所有订阅完成后，等待一小段时间再发送加入通知
+                setTimeout(() => {
+                    this.publishUserJoin();
+                    this.startHeartbeat();
+                    this.requestUserList();
+                }, 500);
+                
+                // 显示聊天区域
+                this.showChatArea();
+                this.showNotification('成功连接到聊天室!', 'success');
+            }).catch(err => {
+                console.error('订阅失败:', err);
+                this.showNotification('订阅主题失败', 'error');
             });
-            
-            // 发送用户加入通知
-            this.publishUserJoin();
-            
-            // 显示聊天区域
-            this.showChatArea();
-            this.showNotification('成功连接到聊天室!', 'success');
         });
 
         // 接收消息
@@ -166,6 +213,7 @@ class MQTTChatroom {
             console.log('MQTT连接已断开');
             this.isConnected = false;
             this.updateConnectionStatus(false);
+            this.stopHeartbeat();
             this.showNotification('连接已断开', 'error');
         });
 
@@ -186,11 +234,15 @@ class MQTTChatroom {
                 this.handleUserJoin(data);
             } else if (topic.endsWith('/users/leave')) {
                 this.handleUserLeave(data);
-            } else if (topic.endsWith('/users/list')) {
-                this.updateUsersList(data.users);
+            } else if (topic.endsWith('/users/heartbeat')) {
+                this.handleUserHeartbeat(data);
+            } else if (topic.endsWith('/users/query')) {
+                this.handleUserQuery(data);
+            } else if (topic.endsWith('/users/response')) {
+                this.handleUserResponse(data);
             }
         } catch (error) {
-            console.error('解析消息失败:', error);
+            console.error('解析消息失败:', error, message);
         }
     }
 
@@ -198,20 +250,152 @@ class MQTTChatroom {
         const joinMessage = {
             username: this.username,
             timestamp: new Date().toISOString(),
-            action: 'join'
+            action: 'join',
+            clientId: this.client.options.clientId
         };
         
-        this.client.publish(`chatroom/${this.chatRoom}/users/join`, JSON.stringify(joinMessage));
+        this.client.publish(`chatroom/${this.chatRoom}/users/join`, JSON.stringify(joinMessage), { qos: 1 });
+        
+        // 添加自己到在线用户列表
+        this.onlineUsers.set(this.username, {
+            username: this.username,
+            lastSeen: Date.now(),
+            clientId: this.client.options.clientId
+        });
+        this.updateUsersList();
     }
 
     publishUserLeave() {
         const leaveMessage = {
             username: this.username,
             timestamp: new Date().toISOString(),
-            action: 'leave'
+            action: 'leave',
+            clientId: this.client.options.clientId
         };
         
-        this.client.publish(`chatroom/${this.chatRoom}/users/leave`, JSON.stringify(leaveMessage));
+        this.client.publish(`chatroom/${this.chatRoom}/users/leave`, JSON.stringify(leaveMessage), { qos: 1 });
+    }
+
+    startHeartbeat() {
+        // 发送心跳
+        this.heartbeatInterval = setInterval(() => {
+            if (this.isConnected) {
+                const heartbeatMessage = {
+                    username: this.username,
+                    timestamp: new Date().toISOString(),
+                    clientId: this.client.options.clientId
+                };
+                
+                this.client.publish(`chatroom/${this.chatRoom}/users/heartbeat`, JSON.stringify(heartbeatMessage), { qos: 0 });
+            }
+        }, 15000); // 每15秒发送一次心跳
+
+        // 清理离线用户
+        this.userSyncInterval = setInterval(() => {
+            this.cleanupOfflineUsers();
+        }, 30000); // 每30秒清理一次离线用户
+    }
+
+    stopHeartbeat() {
+        if (this.heartbeatInterval) {
+            clearInterval(this.heartbeatInterval);
+            this.heartbeatInterval = null;
+        }
+        if (this.userSyncInterval) {
+            clearInterval(this.userSyncInterval);
+            this.userSyncInterval = null;
+        }
+    }
+
+    requestUserList() {
+        // 请求当前在线用户列表
+        const queryMessage = {
+            username: this.username,
+            timestamp: new Date().toISOString(),
+            action: 'query_users',
+            clientId: this.client.options.clientId
+        };
+        
+        this.client.publish(`chatroom/${this.chatRoom}/users/query`, JSON.stringify(queryMessage), { qos: 1 });
+    }
+
+    handleUserJoin(data) {
+        if (data.username !== this.username) {
+            this.onlineUsers.set(data.username, {
+                username: data.username,
+                lastSeen: Date.now(),
+                clientId: data.clientId
+            });
+            this.updateUsersList();
+            this.displaySystemMessage(`${data.username} 加入了聊天室`);
+            
+            // 响应新用户的查询请求
+            setTimeout(() => {
+                this.respondToUserQuery(data.username);
+            }, 1000);
+        }
+    }
+
+    handleUserLeave(data) {
+        if (data.username !== this.username) {
+            this.onlineUsers.delete(data.username);
+            this.updateUsersList();
+            this.displaySystemMessage(`${data.username} 离开了聊天室`);
+        }
+    }
+
+    handleUserHeartbeat(data) {
+        if (data.username !== this.username) {
+            this.onlineUsers.set(data.username, {
+                username: data.username,
+                lastSeen: Date.now(),
+                clientId: data.clientId
+            });
+            this.updateUsersList();
+        }
+    }
+
+    handleUserQuery(data) {
+        if (data.username !== this.username) {
+            // 响应用户查询请求
+            this.respondToUserQuery(data.username);
+        }
+    }
+
+    handleUserResponse(data) {
+        if (data.targetUser === this.username && data.username !== this.username) {
+            this.onlineUsers.set(data.username, {
+                username: data.username,
+                lastSeen: Date.now(),
+                clientId: data.clientId
+            });
+            this.updateUsersList();
+        }
+    }
+
+    respondToUserQuery(targetUser) {
+        const responseMessage = {
+            username: this.username,
+            targetUser: targetUser,
+            timestamp: new Date().toISOString(),
+            action: 'user_response',
+            clientId: this.client.options.clientId
+        };
+        
+        this.client.publish(`chatroom/${this.chatRoom}/users/response`, JSON.stringify(responseMessage), { qos: 1 });
+    }
+
+    cleanupOfflineUsers() {
+        const now = Date.now();
+        const timeout = 60000; // 60秒超时
+        
+        for (const [username, userData] of this.onlineUsers.entries()) {
+            if (username !== this.username && now - userData.lastSeen > timeout) {
+                this.onlineUsers.delete(username);
+                this.displaySystemMessage(`${username} 已离线`);
+            }
+        }
+        this.updateUsersList();
     }
 
     sendMessage() {
@@ -222,10 +406,11 @@ class MQTTChatroom {
             username: this.username,
             text: messageText,
             timestamp: new Date().toISOString(),
-            id: Date.now().toString()
+            id: Date.now().toString(),
+            clientId: this.client.options.clientId
         };
 
-        this.client.publish(`chatroom/${this.chatRoom}/messages`, JSON.stringify(message));
+        this.client.publish(`chatroom/${this.chatRoom}/messages`, JSON.stringify(message), { qos: 1 });
         this.messageInput.value = '';
         this.updateCharCount();
     }
@@ -280,26 +465,6 @@ class MQTTChatroom {
         return content;
     }
 
-    handleUserJoin(data) {
-        this.onlineUsers.add(data.username);
-        this.updateOnlineCount();
-        this.updateUsersList();
-        
-        if (data.username !== this.username) {
-            this.displaySystemMessage(`${data.username} 加入了聊天室`);
-        }
-    }
-
-    handleUserLeave(data) {
-        this.onlineUsers.delete(data.username);
-        this.updateOnlineCount();
-        this.updateUsersList();
-        
-        if (data.username !== this.username) {
-            this.displaySystemMessage(`${data.username} 离开了聊天室`);
-        }
-    }
-
     displaySystemMessage(text) {
         const messageElement = document.createElement('div');
         messageElement.className = 'system-message';
@@ -308,14 +473,12 @@ class MQTTChatroom {
         this.scrollToBottom();
     }
 
-    updateUsersList(users = null) {
-        if (users) {
-            this.onlineUsers = new Set(users);
-        }
-        
+    updateUsersList() {
         this.usersList.innerHTML = '';
         
-        Array.from(this.onlineUsers).sort().forEach(username => {
+        const sortedUsers = Array.from(this.onlineUsers.keys()).sort();
+        
+        sortedUsers.forEach(username => {
             const userElement = document.createElement('div');
             userElement.className = 'user-item';
             
@@ -326,6 +489,10 @@ class MQTTChatroom {
             
             const nameSpan = document.createElement('span');
             nameSpan.textContent = username;
+            if (username === this.username) {
+                nameSpan.textContent += ' (我)';
+                nameSpan.style.fontWeight = 'bold';
+            }
             
             userElement.appendChild(avatar);
             userElement.appendChild(nameSpan);
@@ -379,10 +546,45 @@ class MQTTChatroom {
         this.connectBtn.textContent = '连接聊天室';
     }
 
-    disconnect() {
+    handlePageHidden() {
+        // 页面隐藏时减少心跳频率
+        if (this.heartbeatInterval) {
+            clearInterval(this.heartbeatInterval);
+            this.heartbeatInterval = setInterval(() => {
+                if (this.isConnected) {
+                    const heartbeatMessage = {
+                        username: this.username,
+                        timestamp: new Date().toISOString(),
+                        clientId: this.client.options.clientId
+                    };
+                    
+                    this.client.publish(`chatroom/${this.chatRoom}/users/heartbeat`, JSON.stringify(heartbeatMessage), { qos: 0 });
+                }
+            }, 30000); // 页面隐藏时每30秒发送一次心跳
+        }
+    }
+
+    handlePageVisible() {
+        // 页面可见时恢复正常心跳频率
+        if (this.isConnected) {
+            this.stopHeartbeat();
+            this.startHeartbeat();
+            this.requestUserList(); // 重新请求用户列表
+        }
+    }
+
+    cleanup() {
         if (this.client && this.isConnected) {
             this.publishUserLeave();
-            this.client.end();
+        }
+        this.stopHeartbeat();
+    }
+
+    disconnect() {
+        this.cleanup();
+        
+        if (this.client) {
+            this.client.end(true);
         }
         
         this.isConnected = false;
